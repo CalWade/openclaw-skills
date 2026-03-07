@@ -1,35 +1,38 @@
 ---
 name: feishu-doc-create
-description: 创建飞书云文档并写入结构化内容（标题、正文、代码块、列表等）。Use when user asks to create a Feishu/Lark document, save report/tutorial/analysis/meeting notes to cloud doc, or generate a shareable document link. 全自动，无需人工扫码介入。需要 App ID 和 App Secret，以及 docx:document:create 和 docx:document:write_only 权限。
+description: 创建飞书云文档、写入内容，并同步授予指定用户（主人）管理权限。Use when user asks to: create a Feishu/Lark document, generate a report and save it to cloud, create a document and share it with someone, or "帮我建个飞书文档""创建云文档并授权给我". 全自动，无需人工扫码。前提：飞书 App 已开通 docx:document:create、docx:document:write_only、drive:drive 三个 Tenant token 权限。
 ---
 
 # feishu-doc-create
 
-通过飞书 REST API 全自动创建云文档并写入结构化内容。无需人工介入。
+创建飞书云文档 + 写入内容 + 授权给主人，一次完成。全程自动，无需人工介入。
 
 ## 前提条件
 
-- 飞书自建应用的 App ID 和 App Secret
-- 已开通以下 Tenant token 权限：
-  - `docx:document:create` — 创建文档
-  - `docx:document:write_only` — 写入内容
-  - `docx:document:readonly` — 读取内容（可选）
+1. 飞书自建应用已开通以下 **Tenant token** 权限：
+   - `docx:document:create` — 创建文档
+   - `docx:document:write_only` — 写入内容
+   - `drive:drive` — 云盘操作（含权限管理）
+2. 已知主人的飞书 Open ID（格式：`ou_xxxxxxxxxxxxxxxxx`）
+3. 持有 App ID 和 App Secret
+
+> 如缺少权限（报错 99991672），先用 `feishu-permission-setup` 技能开通权限。
 
 ## 核心流程
 
-### Step 1 — 获取 tenant_access_token
+### Step 1：获取 tenant_access_token
 
 ```bash
 TOKEN=$(curl -s -X POST \
   "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" \
   -H "Content-Type: application/json" \
-  -d "{\"app_id\":\"$APP_ID\",\"app_secret\":\"$APP_SECRET\"}" \
+  -d '{"app_id":"YOUR_APP_ID","app_secret":"YOUR_APP_SECRET"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['tenant_access_token'])")
 ```
 
-> Token 有效期 2 小时，每次调用前重新获取，无需缓存。
+Token 有效期 2 小时，过期重新获取（错误码 99991663）。
 
-### Step 2 — 创建文档
+### Step 2：创建文档
 
 ```bash
 DOC_ID=$(curl -s -X POST \
@@ -40,72 +43,59 @@ DOC_ID=$(curl -s -X POST \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['document']['document_id'])")
 ```
 
-文档访问链接：`https://bytedance.larkoffice.com/docx/{document_id}`
-
-### Step 3 — 写入内容块
+### Step 3：写入内容块
 
 ```bash
 curl -s -X POST \
   "https://open.feishu.cn/open-apis/docx/v1/documents/$DOC_ID/blocks/$DOC_ID/children" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
+  -d '{"children": [...blocks], "index": 0}'
+```
+
+Block 类型说明见 [references/block-types.md](references/block-types.md)。
+
+### Step 4：授权给主人（full_access）
+
+```bash
+curl -s -X POST \
+  "https://open.feishu.cn/open-apis/drive/v1/permissions/$DOC_ID/members?type=docx" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{
-    "children": [ ...blocks ],
-    "index": 0
+    "member_type": "openid",
+    "member_id": "ou_xxxxxxxxxxxxxxxx",
+    "perm": "full_access",
+    "perm_type": "container"
   }'
 ```
 
-`index=0` 表示文档开头，追加到末尾用 `9999`。
+> ⚠️ `type=docx` 必须放在 **query param** 里，放 body 里无效（报错 1770001）。
 
-## Block 类型速查
+### Step 5：返回文档链接
 
-| block_type | 说明 | 字段 |
-|-----------|------|------|
-| 2（无 style）| 普通文本 | `text.elements` |
-| 2 + `style.headingLevel: 1/2/3` | 一/二/三级标题 | `text.elements + text.style` |
-| 3 | 有序列表 | `ordered.elements` |
-| 4 | 无序列表 | `bullet.elements` |
-| 14 | 代码块 | `code.elements + code.style.language` |
-
-代码块语言编号：`1=Go 2=Python 3=Shell 4=JavaScript 49=Bash`
-
-### Block 构建示例（Python）
-
-```python
-def h1(t): return {"block_type": 2, "text": {"elements": [{"text_run": {"content": t}}], "style": {"headingLevel": 1}}}
-def h2(t): return {"block_type": 2, "text": {"elements": [{"text_run": {"content": t}}], "style": {"headingLevel": 2}}}
-def p(t):  return {"block_type": 2, "text": {"elements": [{"text_run": {"content": t}}]}}
-def code(t, lang=3): return {"block_type": 14, "code": {"elements": [{"text_run": {"content": t}}], "style": {"language": lang}}}
-def ol(t): return {"block_type": 3, "ordered": {"elements": [{"text_run": {"content": t}}]}}
-def ul(t): return {"block_type": 4, "bullet": {"elements": [{"text_run": {"content": t}}]}}
+```
+https://bytedance.larkoffice.com/docx/{DOC_ID}
 ```
 
-## 清空文档内容
+## 权限级别
 
-先删除再重写：
+| perm | 说明 |
+|------|------|
+| `view` | 只读，不能编辑 |
+| `edit` | 可编辑，不能管理权限 |
+| `full_access` | 完全控制（推荐给主人） |
 
-```bash
-curl -s -X DELETE \
-  "https://open.feishu.cn/open-apis/docx/v1/documents/$DOC_ID/blocks/$DOC_ID/children/batch_delete" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"start_index": 0, "end_index": 20}'
-```
+## 批量授权多个用户
 
-`end_index` 填实际 block 数量。
+循环调用授权接口即可，每次一个用户。大团队建议用 `chat_id` 方式批量授权（`member_type: "chat"`）。
 
 ## 常见错误
 
-| 错误码 | 原因 | 解决方法 |
-|--------|------|---------|
-| 99991672 | 权限不足 | 检查是否开通 docx 相关权限并发布了新版本 |
-| 99991663 | token 过期/无效 | 重新调用获取接口刷新 |
-| 99992402 | 字段校验失败 | 检查 Request Body 格式 |
-| index 超出范围 | 插入位置超出 block 数量 | 先查 block 总数，index ≤ count-1 |
+| 错误码 | 原因 | 解决 |
+|--------|------|------|
+| 99991672 | `drive:drive` 权限未开通 | 用 `feishu-permission-setup` 技能开通并发布新版本 |
+| 1770001 | 参数格式错误 | 确认 `type=docx` 在 query param 中 |
+| 99991663 | Token 过期 | 重新获取 `tenant_access_token` |
 
-> ⚠️ 注意区分 Tenant token 和 User token，两者权限不同，不可混用。
-
-## 参考资料
-
-- 完整 Shell 脚本：`references/shell-script.md`
-- Python 封装示例：`references/python-helper.md`
+完整可运行脚本见 [references/scripts/create_and_grant.sh](references/scripts/create_and_grant.sh) 和 [references/scripts/feishu_doc.py](references/scripts/feishu_doc.py)。
