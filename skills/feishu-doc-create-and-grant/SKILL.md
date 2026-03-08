@@ -55,10 +55,27 @@ curl -s -X POST \
   "https://open.feishu.cn/open-apis/docx/v1/documents/$DOC_ID/blocks/$DOC_ID/children" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"children": [...blocks], "index": 0}'
+  -d '{
+    "children": [
+      {
+        "block_type": 2,
+        "text": {
+          "elements": [
+            {
+              "text_run": {
+                "content": "文本内容",
+                "text_element_style": { "bold": true }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "index": 0
+  }'
 ```
 
-Block 类型说明见 [references/block-types.md](references/block-types.md)。
+> ⚠️ 注意：`text` 内部必须包含 `elements` 数组，且文本内容需放在 `text_run.content` 中。直接使用 `text: { "content": "..." }` 可能会导致写入空块。
 
 ### Step 4：授权给主人（full_access）
 
