@@ -117,3 +117,13 @@ btns.find(b => b.textContent.trim() === 'Publish')?.click();
 ## 参考资料
 
 - 完整端到端脚本参见 `references/full-workflow.md`
+
+## 权限缺失处理
+
+若调用飞书 API 时返回错误码 `99991672`，按以下流程处理：
+
+1. 从错误信息中提取缺少的权限名（如 `attendance:task:readonly`）
+2. 告知用户：「检测到缺少权限 `[权限名]`，请问要我帮你自动开通，还是你自己去飞书开放平台设置？」
+3. **用户选「帮我开通」** → 调用 `feishu-permission-setup` 技能，自动完成权限申请与版本发布（需扫码登录一次）
+4. **用户选「我自己设置」** → 提示前往 [飞书开放平台](https://open.feishu.cn/app) → 权限管理 → 开通对应权限并发布新版本，完成后告知继续
+
