@@ -115,6 +115,11 @@ Body：
 
 ⚠️ **坑1**：授权前必须先添加 Redirect URL，否则报错 `20029`。
 
+**优化方案（Agent 必做）**：
+1. Agent 应先通过 `browser` 工具进入「Security Settings」→「Redirect URLs」检查配置。
+2. 若为空或不匹配，**必须先自动添加** `https://open.feishu.cn/`。
+3. 确保后续生成的链接中 `redirect_uri` 与后台配置字符级完全一致（含末尾斜杠）。
+
 路径：飞书开放平台 → 应用 → 左侧「Security Settings」→「Redirect URLs」→ 填入回调地址 → Add
 
 示例：
