@@ -1,265 +1,136 @@
----
-name: feishu-calendar
-description: 创建、修改、删除飞书日程，邀请参会人，查询忙闲状态，查看主人个人日历。Use when user asks to schedule a meeting, create a calendar event, check availability, add attendees, or view their Feishu calendar. Requires user OAuth authorization for personal calendar access.
-allowed-tools: Bash(curl:*)
----
-
-# feishu-calendar
+# feishu-calendar（优化版 v2）
 
 管理飞书日历与日程。支持 Bot 自有日历（Tenant Token）和主人个人日历（User Access Token + OAuth）。
 
 ## 前提条件
 
-飞书自建应用已开通以下权限：
 - `calendar:calendar` — 管理日历和日程
-- `calendar:calendar:readonly` — 只读日历（仅查询时可用）
+- `calendar:calendar:readonly` — 只读日历
 
-> ⚠️ 以上权限**默认未开通**。若调用时返回错误码 `99991672`，立即执行以下步骤，不得直接向用户报错：
->
-> 1. 从错误响应的 `msg` 字段提取缺少的权限名
-> 2. 向用户询问：「检测到应用缺少权限 `[权限名]`，有两种处理方式：A. 帮我自动开通（推荐，需扫码一次）；B. 我自己去设置。请选择？」
-> 3. **用户选 A** → 读取并执行 `feishu-permission-setup` 技能，完成后重新调用原 API
-> 4. **用户选 B** → 回复：「请前往 https://open.feishu.cn/app → 权限管理 → 搜索 `[权限名]` → 开通 → 发布新版本，完成后告知我继续。」
-
----
+权限未开通时返回 99991672，执行 feishu-permission-setup 技能自动开通。
 
 ## 一、Bot 日历操作（Tenant Token）
 
-> 适用场景：Bot 代表应用创建日程，**不涉及**主人个人日历。
+适用场景：Bot 代表应用创建日程，邀请用户参加，日程出现在用户个人日历上。**不需要 OAuth，是最简单的方式。**
 
-### Step 1 — 获取 tenant_access_token
+### 获取 Bot 日历 ID
 
-```bash
-TOKEN=$(curl -s -X POST \
-  "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" \
-  -H "Content-Type: application/json" \
-  -d '{"app_id":"YOUR_APP_ID","app_secret":"YOUR_APP_SECRET"}' \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['tenant_access_token'])")
-```
+`GET /calendar/v4/calendars` → 找 `type=primary` 的 `calendar_id`。
 
-### Step 2 — 获取日历列表
+### 创建日程
 
-```
-GET https://open.feishu.cn/open-apis/calendar/v4/calendars
-Authorization: Bearer {token}
-```
+`POST /calendar/v4/calendars/{calendar_id}/events`
 
-返回 `calendar_list`，每项含 `calendar_id`。
+### ⚠️ 关键坑：时间戳必须是字符串 + 正确年份
 
-### Step 3 — 创建日程
+推荐用 timestamp（字符串）而非 date_time，避免时区格式出错：
 
-```
-POST https://open.feishu.cn/open-apis/calendar/v4/calendars/{calendar_id}/events
-```
-
-Body 示例：
 ```json
 {
-  "summary": "周会",
-  "description": "本周工作同步",
-  "start_time": {
-    "date_time": "2026-03-09T10:00:00+08:00",
-    "timezone": "Asia/Shanghai"
-  },
-  "end_time": {
-    "date_time": "2026-03-09T11:00:00+08:00",
-    "timezone": "Asia/Shanghai"
-  },
-  "visibility": "default",
-  "attendee_ability": "can_invite_others"
+  "summary": "日程测试",
+  "start_time": { "timestamp": "1773028800" },
+  "end_time": { "timestamp": "1773032400" },
+  "visibility": "private"
 }
 ```
 
-> ⚠️ 时间格式必须为 RFC3339，含时区偏移（如 `+08:00`）。
+**踩坑记录：**
 
-### Step 4 — 邀请参会人
+1. timestamp 字段是**字符串类型**（`"1773028800"`），不是整数
+2. 必须用**当前真实年份**计算！Agent 容易把 2026 算成 2025，务必用代码验证：
 
+```python
+from datetime import datetime, timezone, timedelta
+tz = timezone(timedelta(hours=8))
+dt = datetime(2026, 3, 9, 12, 0, 0, tzinfo=tz)
+print(int(dt.timestamp()))  # → 1773028800
 ```
-POST https://open.feishu.cn/open-apis/calendar/v4/calendars/{calendar_id}/events/{event_id}/attendees
-```
 
-Body：
+如果用 date_time 格式，必须严格 RFC3339 + 时区偏移：`"2026-03-09T12:00:00+08:00"`
+
+### 邀请参会人（让日程出现在用户日历上）
+
+💡 不走 OAuth 就能让用户看到日程的方法：Bot 创建日程 → 加 attendee → 日程出现在用户日历。
+
+`POST /calendar/v4/calendars/{calendar_id}/events/{event_id}/attendees?user_id_type=open_id`
+
 ```json
-{
-  "attendees": [
-    { "type": "user", "user_id": "ou_xxx" }
-  ],
-  "user_id_type": "open_id"
-}
+{ "attendees": [{ "type": "user", "user_id": "ou_xxxxx" }] }
 ```
 
-### Step 5 — 查询忙闲状态
+设 `visibility=private` 则只有被邀请人可见。
+
+### 查询忙闲
+
+`POST /calendar/v4/freebusy/batch_get`（Tenant Token 即可，无需 OAuth）
+
+### 修改 / 删除日程
+
+- `PATCH /calendar/v4/calendars/{cal}/events/{event}` — 修改
+- `DELETE /calendar/v4/calendars/{cal}/events/{event}` — 删除
+
+---
+
+## 二、主人个人日历（OAuth）
+
+仅当需要**读取**用户已有日程时才走 OAuth。创建日程用 Bot + attendee 即可。
+
+### 四个坑
+
+| #    | 坑                     | 说明                                                         |
+| ---- | ---------------------- | ------------------------------------------------------------ |
+| 1    | redirect_uri 未注册    | 必须先在 Security Settings → Redirect URLs 添加，否则报 20029 |
+| 2    | redirect_uri 未编码    | 必须 URL encode                                              |
+| 3    | 换 token 用错了 header | 必须用 app_access_token，不是 tenant_access_token            |
+| 4    | User Token 2小时过期   | 报 99991663 时用 refresh_token 换新（30天有效）              |
+
+### 授权链接
 
 ```
-POST https://open.feishu.cn/open-apis/calendar/v4/freebusy/batch_get
+https://open.feishu.cn/open-apis/authen/v1/authorize?app_id={APP_ID}&redirect_uri={URL_ENCODED}&scope=calendar:calendar&state=my_state
 ```
 
-Body：
-```json
-{
-  "time_min": "2026-03-07T09:00:00+08:00",
-  "time_max": "2026-03-07T18:00:00+08:00",
-  "user_id_list": ["ou_xxx", "ou_yyy"],
-  "user_id_type": "open_id"
-}
+### 换 Token
+
+先拿 app_access_token，再用 code 换 user_access_token：
+
+```
+POST /authen/v1/access_token
+Authorization: Bearer {app_access_token}
+Body: {"grant_type":"authorization_code","code":"xxx"}
 ```
 
 ---
 
-## 二、主人个人日历（OAuth 授权流程）
+## 三、常见错误速查
 
-> Tenant Token 只能访问 Bot 自己的日历，**无法读写主人的个人日历**。  
-> 需要完成 OAuth 2.0 授权，获取 User Access Token。
-
-### Step 1 — 在开放平台注册回调地址
-
-⚠️ **坑1**：授权前必须先添加 Redirect URL，否则报错 `20029`。
-
-**优化方案（Agent 必做）**：
-1. Agent 应先通过 `browser` 工具进入「Security Settings」→「Redirect URLs」检查配置。
-2. 若为空或不匹配，**必须先自动添加** `https://open.feishu.cn/`。
-3. 确保后续生成的链接中 `redirect_uri` 与后台配置字符级完全一致（含末尾斜杠）。
-
-路径：飞书开放平台 → 应用 → 左侧「Security Settings」→「Redirect URLs」→ 填入回调地址 → Add
-
-示例：
-- `https://your-domain.com/auth/callback`
-- `http://localhost:3000/callback`（本地开发，HTTP 也支持）
-
-### Step 2 — 构建授权链接，发给主人
-
-```
-https://open.feishu.cn/open-apis/authen/v1/authorize
-  ?app_id={YOUR_APP_ID}
-  &redirect_uri={YOUR_REDIRECT_URI_URL_ENCODED}
-  &scope=calendar:calendar
-  &state=my_state
-```
-
-⚠️ **坑2**：`redirect_uri` 必须 URL 编码（`/` → `%2F`，`:` → `%3A`）。
-
-### Step 3 — 主人授权后获取 code
-
-主人点击链接授权后，飞书跳转至：
-```
-https://your-domain.com/auth/callback?code=cXXXXX&state=my_state
-```
-主人将 `code` 值发给 Agent。
-
-### Step 4 — 用 code 换取 User Access Token
-
-⚠️ **坑3**：Authorization header 必须用 `app_access_token`，**不是** `tenant_access_token` 也不是 Basic Auth。
-
-```bash
-# 1. 获取 app_access_token
-APP_TOKEN=$(curl -s -X POST \
-  'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal' \
-  -H 'Content-Type: application/json' \
-  -d '{"app_id":"YOUR_APP_ID","app_secret":"YOUR_APP_SECRET"}' \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['app_access_token'])")
-
-# 2. 用 code 换 user_access_token
-USER_TOKEN_RESP=$(curl -s -X POST \
-  'https://open.feishu.cn/open-apis/authen/v1/access_token' \
-  -H "Authorization: Bearer $APP_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d "{\"grant_type\":\"authorization_code\",\"code\":\"$CODE\"}")
-
-USER_TOKEN=$(echo $USER_TOKEN_RESP | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['access_token'])")
-REFRESH_TOKEN=$(echo $USER_TOKEN_RESP | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['refresh_token'])")
-```
-
-> 建议将 `access_token`、`refresh_token`、`expires_at`（当前时间 + `expires_in`）一起存储。
-
-### Step 5 — 用 User Token 查询主人日历
-
-```bash
-# 获取主日历 ID（type=primary）
-CAL_ID=$(curl -s \
-  'https://open.feishu.cn/open-apis/calendar/v4/calendars' \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-cals=d['data']['calendar_list']
-for c in cals:
-    if c['type']=='primary':
-        print(c['calendar_id'])
-        break
-")
-
-# 查最近7天日程
-START=$(date +%s)
-END=$((START + 7*86400))
-curl -s \
-  "https://open.feishu.cn/open-apis/calendar/v4/calendars/${CAL_ID}/events?page_size=50&start_time=${START}&end_time=${END}" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  | python3 -c "
-import sys,json
-from datetime import datetime
-d=json.load(sys.stdin)
-items=d['data']['items']
-for e in sorted(items, key=lambda x: x.get('start_time',{}).get('timestamp','0')):
-    ts=e.get('start_time',{}).get('timestamp')
-    dt=e.get('start_time',{}).get('date_time')
-    if ts:
-        t=datetime.fromtimestamp(int(ts)/1000)
-        tstr=t.strftime('%m/%d %H:%M')
-    elif dt:
-        t=datetime.fromisoformat(dt.replace('Z','+00:00'))
-        tstr=t.strftime('%m/%d %H:%M')
-    else:
-        tstr='全天'
-    print(f\"{tstr} {e.get('summary','（无标题）')}\")
-"
-```
-
-### Step 6 — 刷新 Token
-
-⚠️ **坑4**：User Token 有效期约 2 小时，过期报 `99991663 Invalid access token`，需用 refresh_token 换新。
-
-```bash
-curl -s -X POST \
-  'https://open.feishu.cn/open-apis/authen/v1/refresh_access_token' \
-  -H "Authorization: Bearer $APP_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d "{\"grant_type\":\"refresh_token\",\"refresh_token\":\"$REFRESH_TOKEN\"}" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print('new token:', d['access_token'])"
-```
-
-> Refresh Token 有效期 30 天，过期后需主人重新走 OAuth 流程。
+| 错误码       | 原因                | 解决                          |
+| ------------ | ------------------- | ----------------------------- |
+| 20029        | redirect_uri 未注册 | 添加到 Redirect URLs          |
+| 20025        | 用了 Basic Auth     | 改用 app_access_token Bearer  |
+| 99991663     | User token 过期     | refresh_token 换新            |
+| 99991672     | 权限不足            | 开通 calendar:calendar 并发版 |
+| 时间戳日期错 | 年份算错            | 用代码算 + 打印验证           |
 
 ---
 
-## 三、常见错误排查
-
-| 错误码 | 原因 | 解决 |
-|--------|------|------|
-| `20029` | redirect_uri 未注册 | 在「Security Settings → Redirect URLs」添加回调地址 |
-| `20025` | 换 token 用了 Basic Auth | 改用 `app_access_token` Bearer 头 |
-| `99991663` | User token 过期 | 用 refresh_token 换新 token |
-| `99991672` | 权限不足 | 检查 `calendar:calendar` 权限 |
-| `1000000` | 日历不存在 | 先调 `GET /calendars` 确认 calendar_id |
-| 日历列表为空 | scope 或权限问题 | 检查 scope 含 `calendar:calendar`，主人是否有日历权限 |
-
----
-
-## 四、触发场景
-
-- 「帮我看看本周日程」
-- 「明天几点有会」
-- 「帮我约个明天下午3点的会」
-- 「我下周哪天有空」
-- 「帮我创建一个明天10点的周会，邀请张三」
-
-## 五、使用流程（Agent 决策树）
+## 四、Agent 决策树
 
 ```
 用户请求日历操作
-    ↓
+  ↓
+创建日程？── 是 → Tenant Token + 创建 + attendee（最简单，无需 OAuth）
+  │
+  否（读取已有日程）
+  ↓
 有 user_access_token？
-  ├─ 是 → ensure_token() → 操作日历
-  └─ 否 → 发送 OAuth 授权链接 → 等待用户回传 code
-              ↓
-          exchange_code(code) → 保存 token → 操作日历
+├─ 是 → ensure_token() → 读取日历
+└─ 否 → OAuth 授权 → 换 token → 读取
 ```
+
+## 五、触发场景
+
+- 「帮我创建一个明天10点的会议」→ Bot 创建 + attendee
+- 「帮我看看本周日程」→ 需要 OAuth 读取
+- 「帮我约个会，邀请张三」→ Bot 创建 + 多个 attendee
+- 「我下周哪天有空」→ freebusy（Tenant Token 即可）
