@@ -1,71 +1,83 @@
----
-name: feishu-attendance
-description: 查询飞书考勤打卡记录和统计数据。Use when user asks to check attendance, view clock-in records, generate attendance reports, detect late arrivals, or summarize monthly attendance.
-allowed-tools: Bash(curl:*)
----
+# feishu-attendance（优化版 v2）
 
-# feishu-attendance
-
-AI Agent 查询飞书考勤打卡记录、考勤组配置、月度统计数据，适用于考勤汇总、异常提醒、月度报表自动生成等场景。
+查询飞书考勤打卡记录、考勤组配置、生成考勤报表。
 
 ## 前提条件
 
-飞书自建应用已开通以下 Tenant token 权限：
+- `attendance:task:readonly` — 查询打卡记录
+- `attendance:rule:readonly` — 查询考勤组规则
 
-| 权限 | 说明 |
-|------|------|
-| `attendance:task:readonly` | 查询打卡记录 |
-| `attendance:rule:readonly` | 查询考勤组规则 |
+权限未开通时返回 99991672，执行 feishu-permission-setup 技能自动开通。
 
-> ⚠️ 以上权限**默认未开通**。若调用时返回错误码 `99991672`，立即执行以下步骤，不得直接向用户报错：
->
-> 1. 从错误响应的 `msg` 字段提取缺少的权限名（如 `attendance:task:readonly`）
-> 2. 向用户询问：「检测到应用缺少权限 `[权限名]`，有两种处理方式：A. 帮我自动开通（推荐，需扫码一次）；B. 我自己去设置。请选择？」
-> 3. **用户选 A** → 读取并执行 `feishu-permission-setup` 技能，完成后重新调用原 API
-> 4. **用户选 B** → 回复：「请前往 https://open.feishu.cn/app → 权限管理 → 搜索 `[权限名]` → 开通 → 发布新版本，完成后告知我继续。」
+## 一、获取考勤组
 
----
+### 列出所有考勤组
 
-## 一、核心 API
+`GET /attendance/v1/groups?page_size=10`
 
-### 1.1 获取考勤组列表
+返回每个考勤组的 group_id、group_name。
 
-```
-GET https://open.feishu.cn/open-apis/attendance/v1/groups?page_size=10
-Authorization: Bearer {token}
-```
+### 获取考勤组详情（含成员列表）
 
-返回所有考勤组的 `group_id`、`name`、时区、考勤规则等。
-
-### 1.2 查询打卡明细
-
-```
-POST https://open.feishu.cn/open-apis/attendance/v1/user_tasks/query
-Authorization: Bearer {token}
-Content-Type: application/json
-```
+`POST /attendance/v1/groups/{group_id}`
 
 ```json
 {
-  "locale": "zh",
-  "staff_type": 1,
-  "include_terminated_user": false,
-  "user_ids": ["ou_xxx", "ou_yyy"],
-  "check_date_from": 20260301,
-  "check_date_to": 20260307,
-  "user_id_type": "open_id"
+  "employee_type": "employee_id",
+  "dept_type": "open_department_id"
 }
 ```
 
-> ⚠️ `check_date_from` / `check_date_to` 为 **整数 YYYYMMDD**，不是字符串。
+返回关键字段：
 
-### 1.3 查询统计汇总
+- `bind_user_ids` — 直接绑定的成员列表（employee_id 格式）
+- `bind_dept_ids` — 绑定的部门列表
+- `leaders` — 负责人
 
+### ⚠️ 关键坑：成员可能藏在部门里
+
+考勤组有两种绑定方式：
+
+1. **直接绑定成员**（bind_user_ids）— 能直接拿到 ID 列表
+2. **绑定部门**（bind_dept_ids）— 成员列表在部门下，需要额外的通讯录权限才能展开
+
+如果用户问「某人的考勤」但在 bind_user_ids 里找不到，很可能此人属于绑定的部门。此时需要 `contact:user.id:readonly` 或 `contact:department.base:readonly` 权限来按姓名搜索用户。
+
+没有通讯录权限时：告知用户该员工可能在部门绑定的考勤组中，需要提供其 employee_id 或开通通讯录权限。
+
+## 二、查询打卡明细
+
+`POST /attendance/v1/user_tasks/query?employee_type=employee_id`
+
+```json
+{
+  "user_ids": ["f75ge8b7", "abc12345"],
+  "check_date_from": 20260301,
+  "check_date_to": 20260307,
+  "need_overtime_result": false
+}
 ```
-POST https://open.feishu.cn/open-apis/attendance/v1/user_stats_datas/query
-Authorization: Bearer {token}
-Content-Type: application/json
-```
+
+### ⚠️ 踩坑点
+
+1. **日期格式是整数 YYYYMMDD**，不是字符串，不是时间戳（如 `20260301`，不是 `"2026-03-01"`）
+2. **employee_type 和 user_ids 必须匹配**：URL 参数 `employee_type=employee_id` 时，user_ids 里传 employee_id；如果用 employee_no 则传工号
+3. **单次最多查 50 人**，超过需分批
+4. **日期范围最长 31 天**
+
+### 返回数据结构
+
+每个用户每天一条记录，包含：
+
+- `user_task.date` — 日期
+- `user_task.records` — 打卡记录数组，每条含：
+  - `check_time` — 打卡时间（Unix 秒字符串）
+  - `location_name` — 打卡地点
+  - `check_result` — 打卡结果（Normal / Late / Early / Missed 等）
+
+## 三、查询统计汇总
+
+`POST /attendance/v1/user_stats_datas/query`
 
 ```json
 {
@@ -73,48 +85,55 @@ Content-Type: application/json
   "stats_type": "month",
   "start_date": 20260301,
   "end_date": 20260331,
-  "user_ids": ["ou_xxx"],
-  "user_id_type": "open_id"
+  "user_ids": ["f75ge8b7"],
+  "need_history": false
 }
 ```
 
-返回字段：出勤天数、迟到次数、早退次数、缺勤天数等。
+注意：此接口的 user_ids 也需要是 employee_id 格式。
 
----
-
-## 二、Agent 使用流程
+## 四、生成考勤报表的标准流程
 
 ```
-1. get_token()
-   ↓
-2. GET /attendance/v1/groups
-   → 确认考勤组（可选）
-   ↓
-3. POST /attendance/v1/user_tasks/query
-   → 查指定用户、指定日期范围的打卡明细
-   ↓
-4. POST /attendance/v1/user_stats_datas/query
-   → 查月度统计（迟到、缺勤等汇总）
-   ↓
-5. 格式化数据，发飞书消息 / 写 Wiki 报表
+1. GET /attendance/v1/groups → 拿到所有考勤组
+     ↓
+2. POST /attendance/v1/groups/{group_id} → 拿到成员列表
+     ↓
+3. POST /attendance/v1/user_tasks/query → 批量查打卡明细
+     ↓
+4. 汇总统计：迟到/早退/缺卡/正常 次数
+     ↓
+5. 格式化输出报表
 ```
 
----
+### 报表格式建议
 
-## 三、常见错误排查
+按日期排列，每人每天一行：
 
-| 错误 / 现象 | 原因 | 解决 |
-|-------------|------|------|
-| `99991672` 权限不足 | `attendance:task:readonly` 未开通或未发版 | 开放平台申请权限后重新发版 |
-| 返回空数据 | 日期范围内无考勤记录，或用户不属于任何考勤组 | 确认日期范围和考勤组成员 |
-| 日期格式错误 | `check_date_from` 传了字符串而非整数 | 使用整数 `YYYYMMDD`，例如 `20260301` |
+```
+姓名 | 日期  | 上班打卡 | 下班打卡 | 状态
+张三 | 03/02 | 09:02   | 18:15   | 正常
+张三 | 03/03 | 09:35   | 18:00   | 迟到
+```
 
----
+## 五、常见错误
 
-## 四、触发场景
+| 错误            | 原因                           | 解决                                   |
+| --------------- | ------------------------------ | -------------------------------------- |
+| 99991672        | 权限未开通                     | 执行 feishu-permission-setup           |
+| 返回空数据      | 用户不属于该考勤组             | 确认考勤组成员，或检查是否在部门绑定中 |
+| 日期格式错误    | 传了字符串                     | 改用整数 YYYYMMDD                      |
+| user_ids 不匹配 | employee_type 和 ID 格式不一致 | 统一用 employee_id                     |
+
+## 六、触发场景
 
 - 「查一下小王本周的打卡记录」
 - 「生成全组 3 月份考勤报表」
 - 「列出本月迟到 3 次以上的员工」
-- 「昨天有没有人漏打卡？」
-- 「自动汇总每月考勤发到 HR 群」
+- 「XX 今天打卡了吗」
+
+## 七、已知限制
+
+- 无法通过姓名查找员工（需要通讯录权限 `contact:user.id:readonly`）
+- 部门绑定的考勤组无法直接展开成员列表（需要 `contact:department.base:readonly`）
+- 打卡明细单次最多 50 人、31 天
