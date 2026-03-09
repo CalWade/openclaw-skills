@@ -120,7 +120,7 @@ Body:
 }
 ```
 
-> ⚠️ 日期字段传 **Unix 毫秒时间戳**（13 位整数）  
+> ⚠️ 日期字段传 **Unix 毫秒时间戳**（13 位整数）
 > ⚠️ 超链接字段必须传 `{"link": "...", "text": "..."}` 两个字段都不能为空字符串
 
 ### Step 6：查询记录
@@ -171,3 +171,8 @@ https://xxx.feishu.cn/base/xxxxx
 | 默认空行干扰 | 新建表格自动创建空行 | GET records → 找短 ID → 逐条 DELETE |
 | 单选写入失败 | 直接传字符串无效 | 传 `{"text":"选项名","id":"optXxx"}` |
 | 链接点不开/末尾多 %29 | 用了 Markdown 链接语法 | 改用纯文本裸链接，前后不紧贴括号 |
+
+## 参考脚本
+
+- `references/scripts/bitable.sh` — 完整 Shell 流程（含清空空行）
+- `references/scripts/feishu_bitable.py` — Python 封装（含 `clear_empty_rows`、`update_record`，自动读取 openclaw.json 凭证）

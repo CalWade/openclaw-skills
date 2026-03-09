@@ -144,3 +144,7 @@ POST https://open.feishu.cn/open-apis/docx/v1/documents/{obj_token}/blocks/{obj_
 - 「列出所有 Wiki 空间」
 - 「读取某个 Wiki 页面的内容」
 - 「自动归档今日日报到 Wiki」
+
+## 参考脚本
+
+- `references/scripts/wiki.sh` — 完整 Shell 脚本（获取空间列表 → 列出节点 → 创建页面 → 写入内容）

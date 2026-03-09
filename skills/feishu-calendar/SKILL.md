@@ -258,3 +258,7 @@ print(f"{dt} → {ts}")  # 必须打印确认年份正确
               ↓
        exchange_code(code) → 保存 token → 查询日历
 ```
+
+## 参考脚本
+
+- `references/scripts/feishu_calendar.py` — Python 封装（含 `ensure_token` 自动刷新、`exchange_code` OAuth 换 token、`get_auth_url`、`invite_attendees`、`check_freebusy`）

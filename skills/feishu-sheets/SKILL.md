@@ -130,3 +130,8 @@ https://xxx.feishu.cn/sheets/xxxxx
 | range 格式错误 | sheet_id 不对或格式有误 | 确认格式为 `SheetId!A1:C3` |
 | 数据不写入 | values 不是二维数组 | 每行数据必须包在 `[]` 里，整体再包一层 `[]` |
 | 链接点不开/末尾多 %29 | 用了 Markdown 链接语法 | 改用纯文本裸链接，前后不紧贴括号 |
+
+## 参考脚本
+
+- `references/scripts/sheets.sh` — 完整 Shell 脚本（自动读取 openclaw.json 凭证，`bash sheets.sh create [标题]` 直接运行）
+- `references/scripts/feishu_sheets.py` — Python 封装（含自动计算 range、自动读取 openclaw.json 凭证）
