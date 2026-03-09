@@ -20,6 +20,23 @@ allowed-tools: Bash(curl:*)
 > 3. **用户选 A** → 读取并执行 `feishu-permission-setup` 技能，完成后重新调用原 API
 > 4. **用户选 B** → 回复：「请前往 https://open.feishu.cn/app → 权限管理 → 搜索 `[权限名]` → 开通 → 发布新版本，完成后告知我继续。」
 
+---
+
+## ⚠️ 链接输出规则（飞书消息兼容）
+
+**向用户回复文档链接时，必须使用纯文本裸链接，禁止使用 Markdown 链接语法。**
+
+```
+✅ 正确：表格已创建：https://xxx.feishu.cn/sheets/abc123
+❌ 错误：[点击查看](https://xxx.feishu.cn/sheets/abc123)
+❌ 错误：表格链接：(https://xxx.feishu.cn/sheets/abc123)
+```
+
+**原因：** 飞书消息解析会将 Markdown 括号 `)` 编码为 `%29` 追加到 URL 末尾，导致链接无法打开。
+**规则：** 链接前后不要紧贴括号、方括号等特殊字符，用空格或换行隔开。
+
+---
+
 ## 核心流程
 
 ### Step 1：获取 tenant_access_token
@@ -86,6 +103,25 @@ POST https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}/values_appe
 # Body 结构同写入，自动追加到已有数据末尾
 ```
 
+---
+
+## 回复模板
+
+创建完成后，按以下格式回复用户：
+
+```
+✅ 电子表格已创建并写入数据
+
+📊 标题
+https://xxx.feishu.cn/sheets/xxxxx
+
+写入了 X 行 Y 列数据。
+```
+
+注意：链接单独一行，前后无括号。
+
+---
+
 ## 常见错误
 
 | 错误 | 原因 | 解决 |
@@ -93,5 +129,9 @@ POST https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}/values_appe
 | 99991672 | 权限不足 | 确认开通 `sheets:spreadsheet` |
 | range 格式错误 | sheet_id 不对或格式有误 | 确认格式为 `SheetId!A1:C3` |
 | 数据不写入 | values 不是二维数组 | 每行数据必须包在 `[]` 里，整体再包一层 `[]` |
+| 链接点不开/末尾多 %29 | 用了 Markdown 链接语法 | 改用纯文本裸链接，前后不紧贴括号 |
 
-完整可运行脚本见 [references/scripts/sheets.sh](references/scripts/sheets.sh) 和 [references/scripts/feishu_sheets.py](references/scripts/feishu_sheets.py)。
+## 参考脚本
+
+- `references/scripts/sheets.sh` — 完整 Shell 脚本（自动读取 openclaw.json 凭证，`bash sheets.sh create [标题]` 直接运行）
+- `references/scripts/feishu_sheets.py` — Python 封装（含自动计算 range、自动读取 openclaw.json 凭证）

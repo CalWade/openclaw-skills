@@ -98,3 +98,7 @@ Authorization: Bearer {token}
 - 「把这次会议纪要发到 XXX 群」
 - 「列出本周所有妙记」
 - 「自动归档会议纪要到 Wiki」
+
+## 参考脚本
+
+- `references/scripts/minutes.sh` — 完整 Shell 脚本（获取妙记列表 → 读取详情 → 获取转写内容）

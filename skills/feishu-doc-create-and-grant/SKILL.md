@@ -96,4 +96,12 @@ https://bytedance.larkoffice.com/docx/{DOC_ID}
 |--------|------|------|
 | 99991672 | 权限未开通 | 确认应用已发布并包含 drive:drive 等权限 |
 | 1770001 | 参数格式错误 | 确认 type=docx 在 URL 查询参数中 |
+<<<<<<< HEAD
 | 99991663 | Token 过期 | 重新获取 Token |
+
+## 参考资料
+
+- `references/scripts/create_and_grant.sh` — 完整 Shell 脚本（token → 创建 → 写入 → 授权）
+- `references/shell-script.md` — Shell 写入内容示例（含标题、正文、代码块 block 格式）
+- `references/python-helper.md` — Python 封装（含 `h1/h2/h3/p/code/ol/ul` block 构建函数、`clear_doc`）
+- `references/block-types.md` — Block 类型完整对照表
